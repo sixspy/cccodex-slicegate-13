@@ -49,3 +49,13 @@ python -m pip install -r requirements.txt
 python -m uvicorn app:app --app-dir backend --host 127.0.0.1 --port 10623
 python -m pytest -q
 `
+
+## 完整度豁免审批闭环
+
+- 豁免策略册 `exemption_policy`：按业务日唯一，口径限甲、乙单独一路，首落笔锁定、当天不许再换；改选/混路一律 409 并记「豁免口径偏了」。
+- 甲处置：豁免通过只代表本趟视为完整，**仍须走 `/api/slices/{id}/release` 放行入口**；审批接口不改 `release_status`，禁止审批通过顺带写成已放行。
+- 乙处置：豁免通过只开放 `/api/slices/{id}/exemption-preview` 降级只读预览（不写放行态、不写水位）；正式成功放行连同水位在放行入口仍硬拒绝，须另开 `/api/slices/{id}/backfill-order` 补齐单。
+- 未审批/被拒豁免不得当成完整；策略册与豁免单口径不一致（豁免口径偏了）按硬拒绝处理。
+- 两名值班同时落笔：所有豁免写操作经 `BEGIN IMMEDIATE` 串行互斥，后手显式返回「豁免争用」并落审计，禁止悄悄写成成功。
+- 四方可核：豁免列表 `/api/exemptions`、审批详情 `/api/exemptions/{id}`、放行闸读数 `/api/gate-readings`、策略旁注 `/api/exemption-events` 共用同一裁决函数 `gate_verdict`，读数一致。
+- 登录、既有文件库 `data/app.db` 沿用；新表 `CREATE TABLE IF NOT EXISTS` 增量迁移，旧数据不动。
